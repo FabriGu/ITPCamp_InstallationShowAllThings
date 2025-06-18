@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Body Outline Image Placement</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        
+        #canvas-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        #controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        #status {
+            text-align: center;
+            font-size: 18px;
+            margin-top: 20px;
+            min-height: 25px;
+        }
+        
+        .waiting { color: #666; }
+        .detecting { color: #ff6b35; }
+        .pulsing { color: #f7931e; }
+        .placing { color: #7fb069; }
+        .complete { color: #2d5a27; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h1>Body Outline Image Placement</h1>
+        <p>Stand in front of the camera and hold still for the magic to happen!</p>
+        <button onclick="resetExperience()">Reset</button>
+        <button onclick="toggleDebugMode()">Toggle Debug View</button>
+    </div>
+    
+    <div id="canvas-container">
+        <!-- p5.js canvas will be inserted here -->
+    </div>
+    
+    <div id="status" class="waiting">
+        Waiting for person to appear...
+    </div>
+
+    <!-- Load p5.js and ml5.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.js"></script>
+    
+    <!-- Load our custom modules -->
+    <script src="bodySegmentation.js"></script>
+    <script src="edgeDetection.js"></script>
+    <script src="imagePlacement.js"></script>
+    <script src="sketch.js"></script>
+    
+    <script>
+        // Global functions for UI controls
+        function resetExperience() {
+            if (window.resetState) {
+                window.resetState();
+            }
+        }
+        
+        function toggleDebugMode() {
+            if (window.toggleDebug) {
+                window.toggleDebug();
+            }
+        }
+        
+        function updateStatus(message, className = 'waiting') {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = message;
+            statusElement.className = className;
+        }
+    </script>
+</body>
+</html>
