@@ -28,10 +28,10 @@
 // Configuration constants for the placement algorithm
 const PLACEMENT_CONFIG = {
     minImageSize: 50,        // Minimum size for any placed rectangle
-    maxImageSize: 150,       // Maximum size for any placed rectangle
+    maxImageSize: 200,       // Maximum size for any placed rectangle
     minSpacing: 10,          // Minimum distance between rectangles
-    maxAttempts: 100,        // Maximum placement attempts per rectangle
-    sampleDensity: 5,        // How densely to sample the interior space
+    maxAttempts: 30,        // Maximum placement attempts per rectangle
+    sampleDensity: 10,        // How densely to sample the interior space
     aspectRatios: [          // Preferred aspect ratios for variety
         1.0,    // Square
         1.5,    // Slightly rectangular
