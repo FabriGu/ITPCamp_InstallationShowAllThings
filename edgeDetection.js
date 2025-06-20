@@ -50,7 +50,7 @@ function extractEdgesFromMask(mask) {
     // Step 4: Filter out tiny contours that are likely noise
     const filteredContours = filterContours(smoothedContours);
     
-    console.log(`✅ Edge detection complete: ${filteredContours.length} contours found`);
+    // console.log(`✅ Edge detection complete: ${filteredContours.length} contours found`);
     
     return filteredContours;
 }

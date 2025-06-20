@@ -64,30 +64,31 @@ function draw() {
     manageImageFading();
 }
 
+
 function loadAvailableImages() {
-    // Pre-define common image filenames that might exist in the images folder
-    // In a real setup, you'd scan the directory or have a manifest file
+    // Your specific image filenames from the uploaded directory
     const imageFilenames = [
-        'image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.jpg',
-        'image1.png', 'image2.png', 'image3.png', 'image4.png', 'image5.png',
-        'photo1.jpg', 'photo2.jpg', 'photo3.jpg', 'photo4.jpg', 'photo5.jpg'
+        '5W3A3139.JPG', '5W3A3140.JPG', '5W3A3141.JPG', '5W3A3142.JPG', 
+        '5W3A3143.JPG', '5W3A3144.JPG', '5W3A3145.JPG', '5W3A3146.JPG',
+        '5W3A3147.JPG', '5W3A3148.JPG', '5W3A3149.JPG', '5W3A3150.JPG',
+        '5W3A3151.JPG', '5W3A3152.JPG', '5W3A3153.JPG', '5W3A3154.JPG',
+        '5W3A3155.JPG', '5W3A3156.JPG'
     ];
     
-    // Attempt to load each image, silently skipping ones that don't exist
+    console.log("Loading images from images/ folder...");
+    
+    // Load each image and add to availableImages array when successful
     for (let filename of imageFilenames) {
         loadImage(`images/${filename}`, 
             (img) => {
                 availableImages.push(img);
-                console.log(`Loaded image: ${filename}`);
+                console.log(`✅ Loaded: ${filename} (${img.width}x${img.height}, ratio: ${(img.width/img.height).toFixed(2)})`);
             },
-            () => {
-                // Silently ignore missing images
+            (err) => {
+                console.warn(`⚠️ Could not load: ${filename}`);
             }
         );
     }
-    
-    // If no images are found, we'll use colored rectangles as fallback
-    console.log("Attempting to load images from images/ folder");
 }
 
 function onSegmentationResult(segmentation) {
@@ -141,8 +142,8 @@ function placeImagesForCurrentPerson() {
     
     console.log("Placing images for detected person");
     
-    // Use the existing placement algorithm to get rectangle positions
-    let rectanglePositions = placeImagesInBodyOutline(currentEdges, 6);
+    // Pass the loaded images to the placement algorithm
+    let rectanglePositions = placeImagesInBodyOutline(currentEdges, availableImages, 6);
     
     // Convert rectangles to image objects with fade properties
     for (let rect of rectanglePositions) {
@@ -151,9 +152,10 @@ function placeImagesForCurrentPerson() {
             y: rect.y,
             width: rect.width,
             height: rect.height,
-            opacity: 1.0, // Start fully opaque
-            image: getRandomImage(),
-            birthTime: millis()
+            opacity: 1.0,
+            image: rect.assignedImage, // Use the image assigned by the placement algorithm
+            birthTime: millis(),
+            aspectRatio: rect.aspectRatio
         };
         
         placedImages.push(imageObj);
@@ -176,10 +178,11 @@ function drawPlacedImages() {
         tint(255, img.opacity * 255);
         
         if (img.image) {
-            // Draw actual loaded image
+            // Draw the actual loaded image, preserving its aspect ratio
+            // The rectangle dimensions already respect the aspect ratio from placement
             image(img.image, img.x, img.y, img.width, img.height);
         } else {
-            // Fallback: draw colored rectangle if no images loaded
+            // Fallback: draw colored rectangle if image failed to load
             fill(random(50, 200), random(50, 200), random(50, 200), img.opacity * 255);
             noStroke();
             rect(img.x, img.y, img.width, img.height);
