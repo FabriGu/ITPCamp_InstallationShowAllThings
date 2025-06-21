@@ -12,16 +12,17 @@
  * This approach is much simpler and more predictable than growth-based system
  */
 
-// ========== EASILY CONFIGURABLE VARIABLES ==========
+// ========== CONFIGURABLE VARIABLES ==========
+
 const COUNTDOWN_DURATION = 3000; // 3 seconds - CHANGE THIS to adjust countdown time
-const MAX_COMMEMORATIVE_OBJECTS = 100; // CHANGE THIS to adjust how many to keep
+const MAX_COMMEMORATIVE_OBJECTS = 30; // CHANGE THIS to adjust how many to keep
 const KEYPOINT_FADE_START_COLOR = [0, 255, 0]; // Bright green
 const KEYPOINT_FADE_END_COLOR = [0, 0, 0]; // Black
-const KEYPOINT_DOT_SIZE = 12; // Size of countdown dots
+const KEYPOINT_DOT_SIZE = 16; // Size of countdown dots
 
 // Canvas dimensions
-const CANVAS_WIDTH = 640;
-const CANVAS_HEIGHT = 480;
+const CANVAS_WIDTH = window.displayWidth - (window.displayWidth/5); // Adjusted for full window width
+const CANVAS_HEIGHT = window.displayHeight - (window.displayHeight/5);
 
 // System state - simplified for countdown model
 let video;
@@ -51,15 +52,44 @@ let commemorativeObjects = []; // Array of completed interaction objects
 let nextObjectId = 1; // For tracking commemorative objects
 
 function preload() {
-    bodyPose = ml5.bodyPose();
+    bodyPose = ml5.bodyPose("MoveNet", {
+        modelType: "MULTIPOSE_LIGHTNING", // "MULTIPOSE_LIGHTNING", "SINGLEPOSE_LIGHTNING", or "SINGLEPOSE_THUNDER".
+        enableSmoothing: true,
+        minPoseScore: 0.25,
+        multiPoseMaxDimension: 256,
+        enableTracking: true,
+        trackerType: "keypoint", // "keypoint" or "boundingBox"
+        trackerConfig: {},
+        modelUrl: undefined,
+        flipped: true 
+    });
 }
 
 function setup() {
-    let canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
+  
+    // let canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
+        let canvas = createCanvas(windowWidth, windowHeight);
+
     canvas.parent('canvas-container');
+    document.getElementById('canvas-container').style.display = 'flex';
+    document.getElementById('canvas-container').style.justifyContent = 'center';
+    document.getElementById('canvas-container').style.alignItems = 'center';
+    document.getElementById('canvas-container').style.width = '100%';
+    document.getElementById('canvas-container').style.height = '100%';
+    document.getElementById('canvas-container').style.position = 'absolute';
+    document.getElementById('canvas-container').style.top = '0';
+    document.getElementById('canvas-container').style.left = '0';
+
+
     
     video = createCapture(VIDEO);
-    video.size(CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    aspectRatio = video.width / video.height; // Update aspect ratio based on video size
+    let vidWidth = windowWidth;
+    let vidHeight = windowWidth / aspectRatio;
+    // video.size(CANVAS_WIDTH, CANVAS_HEIGHT);
+    video.size(vidWidth, vidHeight);
+
     video.hide();
     
     loadAvailableImages();
@@ -86,7 +116,8 @@ function loadAvailableImages() {
         '5W3A3151.JPG', '5W3A3152.JPG', '5W3A3153.JPG', '5W3A3154.JPG',
         '5W3A3155.JPG', '5W3A3156.JPG'
     ];
-    
+
+
     for (let filename of imageFilenames) {
         loadImage(`images/${filename}`, 
             (img) => availableImages.push(img)
@@ -145,18 +176,21 @@ function handleNoPersonDetected() {
  * Extract target keypoints for countdown and eventual image placement
  */
 function extractTargetKeypoints(pose) {
+    console.log("Extracting target keypoints from pose:", pose);
+    // Names taken from the ml5 bodySegmentation reference https://docs.ml5js.org/#/reference/body-segmentation
     const targetNames = [
         'nose',           // Head
         'left_shoulder', 'right_shoulder',
-        'left_elbow', 'right_elbow',
+        // 'left_elbow', 'right_elbow',
         'left_wrist', 'right_wrist',
-        'left_hip', 'right_hip'
+        // 'left_hip', 'right_hip'
     ];
     
     const validKeypoints = [];
     
     for (let targetName of targetNames) {
         let keypoint = pose.keypoints.find(kp => 
+            // As long as teh keypoint exists and has high confidence (this part reduces jitteryness)
             kp.name === targetName && kp.confidence > 0.4
         );
         
@@ -254,11 +288,11 @@ function drawCountdownKeypoints() {
 function captureInteraction() {
     if (!currentCountdown || currentCountdown.keypoints.length === 0) return;
     
-    // Create the commemorative object that will store everything
+    // Create the commemorative object that will store everything easier for management and to draw in future
     let commemorativeObject = {
         outline: null,          // Will be filled by outline capture
         images: [],             // Will be filled with placed images
-        captureTime: millis(),
+        captureTime: millis(),  // for reference
         id: nextObjectId++
     };
     

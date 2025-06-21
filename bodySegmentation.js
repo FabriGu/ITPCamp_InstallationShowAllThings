@@ -17,8 +17,16 @@ let graphicsBuffer = null; // Reusable graphics buffer
 // Optimized configuration for clean captures
 const captureSegmentationOptions = {
     maskType: "background",
+    segmentationThreshold: 0.3, // Lower threshold for cleaner captures
+    // outputStride: 16, // Reduced stride for better performance
+    // quantBytes: 2, // Reduced quantization for lower memory usage
     runtime: "tfjs",    
-    modelType: "general"
+    // internalResolution: "low",
+    // multiSegmentation: true, // Single segmentation for simplicity
+    // modelType: "general",
+    architecture: 'MobileNetV1',
+    flipped: true
+    
 };
 
 /**

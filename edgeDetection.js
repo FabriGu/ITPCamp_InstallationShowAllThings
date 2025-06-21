@@ -136,16 +136,7 @@ function detectEdgePixelsFromArray(pixels, width, height) {
     return edgeMap;
 }
 
-/**
- * LEGACY: Detect edge pixels from mask object (for backward compatibility)
- * 
- * This maintains the original function interface but now loads pixels only once
- * and delegates to the optimized array-based function.
- */
-function detectEdgePixels(mask) {
-    mask.loadPixels(); // Load once here
-    return detectEdgePixelsFromArray(mask.pixels, mask.width, mask.height);
-}
+
 
 /**
  * Extract contours from edge pixels using connected component analysis
@@ -383,12 +374,12 @@ function drawEdges(contours, edgeColor, thickness = 2) {
     // contours = contours;
 
     // contours = contours.slice(1, contours.length - 1);
-    console.log(contours)
+    // console.log(contours)
 
     // Draw each contour as a connected path
     for (let contour of contours) {
         if (contour.length < 2) continue;
-        console.log(contour);
+        // console.log(contour);
             contour = contour.slice(1, contour.length - 1);
 
         beginShape();
