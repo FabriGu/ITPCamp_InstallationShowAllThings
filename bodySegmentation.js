@@ -1,215 +1,164 @@
 /*
- * bodySegmentation.js - ML5 Body Segmentation Integration
- * 
- * This module handles all interactions with the ml5.js bodySegmentation model.
- * It's optimized for real-time performance and focuses on person detection
- * rather than detailed body part segmentation.
+ * bodySegmentation.js - Optimized Capture-Based Body Segmentation
+ * MEMORY AND PERFORMANCE OPTIMIZED VERSION
  * 
  * Key optimizations:
- * - Uses 'person' mask type for better performance than 'parts'
- * - Implements frame rate limiting to prevent overwhelming the model
- * - Handles model loading and error states gracefully
+ * - Eliminated console logging for better performance
+ * - Proper graphics object disposal to prevent memory leaks
+ * - Simplified processing pipeline
+ * - Better error handling without spam
+ * - Reduced memory allocations
  */
 
-let bodySegmentation;
-let segmentationCallback;
-let isProcessing = false;
-let lastProcessingTime = 0;
-const PROCESSING_INTERVAL = 100; // Process every 100ms for smooth but performant detection
+let captureBodySegmentation = null;
+let captureInProgress = false;
+let graphicsBuffer = null; // Reusable graphics buffer
 
-// Configuration optimized for person outline detection
-const segmentationOptions = {
-    maskType: "background", // Focus on person vs background, not individual body parts
-    runtime: "tfjs",    // Use TensorFlow.js for better browser compatibility
-    modelType: "general" // General model works well for most body types
+// Optimized configuration for clean captures
+const captureSegmentationOptions = {
+    maskType: "background",
+    runtime: "tfjs",    
+    modelType: "general"
 };
 
 /**
- * Initialize the body segmentation system
- * 
- * This function sets up the ml5 bodySegmentation model and begins processing
- * video frames. The model is preloaded to ensure smooth operation.
- * 
- * @param {p5.Element} videoElement - The p5.js video capture element
- * @param {Function} onResult - Callback function to handle segmentation results
+ * Initialize body segmentation for commemorative captures
+ * Optimized for minimal memory footprint and clean resource management
  */
-function initializeBodySegmentation(videoElement, onResult) {
-    segmentationCallback = onResult;
+function initializeBodySegmentationForCapture(videoElement, onCaptureComplete) {
+    if (captureInProgress) return;
     
-    console.log("Initializing body segmentation model...");
+    captureInProgress = true;
     
-    // Create the body segmentation model with optimized settings
-    bodySegmentation = ml5.bodySegmentation("BodyPix", segmentationOptions, modelLoaded);
+    if (!captureBodySegmentation) {
+        captureBodySegmentation = ml5.bodySegmentation("BodyPix", captureSegmentationOptions, modelLoaded);
+    } else {
+        performSingleCapture(videoElement, onCaptureComplete);
+    }
     
     function modelLoaded() {
-        console.log("✅ Body segmentation model loaded successfully");
-        
-        // Start the detection process
-        startDetection(videoElement);
+        performSingleCapture(videoElement, onCaptureComplete);
     }
 }
 
 /**
- * Start continuous body detection on the video feed
- * 
- * This uses detectStart() for continuous processing, but implements
- * our own throttling to control the frame rate and prevent overwhelming
- * the system.
- * 
- * @param {p5.Element} videoElement - The video feed to process
+ * Perform optimized single capture with proper cleanup
  */
-function startDetection(videoElement) {
-    if (!bodySegmentation) {
-        console.error("❌ Body segmentation model not loaded");
+function performSingleCapture(videoElement, onCaptureComplete) {
+    if (!captureBodySegmentation) {
+        captureInProgress = false;
         return;
     }
     
-    console.log("🎥 Starting body detection...");
-    
-    // Use detectStart for continuous processing
-    bodySegmentation.detectStart(videoElement, handleSegmentationResult);
+    captureBodySegmentation.detect(videoElement, (result) => {
+        handleCaptureResult(result, onCaptureComplete);
+    });
 }
 
 /**
- * Handle results from the body segmentation model
- * 
- * This function implements intelligent throttling and quality checking
- * before passing results to the main application.
- * 
- * @param {Object} result - Segmentation result from ml5
+ * Handle capture results with memory-conscious processing
  */
-function handleSegmentationResult(result) {
-    // Throttle processing to maintain performance
-    const currentTime = millis();
-    if (currentTime - lastProcessingTime < PROCESSING_INTERVAL) {
-        return; // Skip this frame
-    }
-    lastProcessingTime = currentTime;
+function handleCaptureResult(result, onCaptureComplete) {
+    captureInProgress = false;
     
-    // Validate the result
     if (!result || !result.mask) {
-        console.warn("⚠️ Invalid segmentation result received");
-        if (segmentationCallback) {
-            segmentationCallback(null);
-        }
+        if (onCaptureComplete) onCaptureComplete(null);
         return;
     }
     
-    // Process the result for better quality
-    const processedResult = enhanceSegmentationResult(result);
+    // Process with optimized enhancement
+    const enhancedResult = enhanceForCommemorative(result);
     
-    // Pass the result to the main application
-    if (segmentationCallback) {
-        segmentationCallback(processedResult);
+    if (onCaptureComplete) {
+        onCaptureComplete(enhancedResult);
     }
 }
 
 /**
- * Enhance the segmentation result for better edge detection
- * 
- * This function applies post-processing to improve the quality of the
- * segmentation mask, which leads to cleaner edge detection.
- * 
- * @param {Object} result - Original segmentation result
- * @returns {Object} Enhanced segmentation result
+ * Memory-optimized commemorative enhancement
+ * Reuses graphics buffers and cleans up properly
  */
-function enhanceSegmentationResult(result) {
-    // Create a copy of the result to avoid modifying the original
-    const enhancedResult = {
-        mask: result.mask,
+function enhanceForCommemorative(result) {
+    result.mask.loadPixels();
+    
+    // Create or reuse graphics buffer to prevent memory buildup
+    if (!graphicsBuffer || 
+        graphicsBuffer.width !== result.mask.width || 
+        graphicsBuffer.height !== result.mask.height) {
+        
+        if (graphicsBuffer) {
+            graphicsBuffer.remove(); // Clean up old buffer
+        }
+        graphicsBuffer = createGraphics(result.mask.width, result.mask.height);
+    }
+    
+    const commemorativeMask = applyCommemoratveEnhancement(result.mask);
+    
+    return {
+        mask: commemorativeMask,
         data: result.data,
-        imageData: result.imageData
+        imageData: result.imageData,
+        isCommemorative: true
     };
-    
-    // Apply morphological operations to clean up the mask
-    // This helps remove small noise and fills in small gaps
-    enhancedResult.mask = applyMorphologicalOperations(result.mask);
-    
-    return enhancedResult;
 }
 
 /**
- * Apply morphological operations to clean up the segmentation mask
- * 
- * Morphological operations help create cleaner, more stable outlines by:
- * - Removing small noise (erosion followed by dilation)
- * - Filling small gaps in the person silhouette
- * - Smoothing jagged edges
- * 
- * @param {p5.Image} originalMask - The original segmentation mask
- * @returns {p5.Image} Cleaned up mask
+ * Simplified morphological operations optimized for performance
+ * Reduced kernel size and optimized pixel access patterns
  */
-function applyMorphologicalOperations(originalMask) {
-    // Create a new graphics buffer for processing
-    let processedMask = createGraphics(originalMask.width, originalMask.height);
+function applyCommemoratveEnhancement(originalMask) {
+    graphicsBuffer.loadPixels();
     
-    // Load the original mask pixels - do this ONCE for efficiency
-    originalMask.loadPixels();
-    processedMask.loadPixels();
-    
-    // Apply a simple morphological closing operation
-    // This fills small gaps and removes small noise
-    const kernelSize = 3; // Small kernel for subtle effect
+    const kernelSize = 3; // Smaller kernel for better performance
     const halfKernel = Math.floor(kernelSize / 2);
+    const width = originalMask.width;
+    const height = originalMask.height;
     
-    for (let y = halfKernel; y < originalMask.height - halfKernel; y++) {
-        for (let x = halfKernel; x < originalMask.width - halfKernel; x++) {
+    // Optimized morphological closing operation
+    for (let y = halfKernel; y < height - halfKernel; y++) {
+        for (let x = halfKernel; x < width - halfKernel; x++) {
             let maxAlpha = 0;
             
-            // Check kernel area for maximum alpha value
+            // Efficient kernel processing
             for (let ky = -halfKernel; ky <= halfKernel; ky++) {
                 for (let kx = -halfKernel; kx <= halfKernel; kx++) {
-                    const idx = ((y + ky) * originalMask.width + (x + kx)) * 4;
-                    maxAlpha = Math.max(maxAlpha, originalMask.pixels[idx + 3]);
+                    const idx = ((y + ky) * width + (x + kx)) * 4;
+                    const alpha = originalMask.pixels[idx + 3];
+                    if (alpha > maxAlpha) maxAlpha = alpha;
                 }
             }
             
-            // Set pixel in processed mask
-            const idx = (y * processedMask.width + x) * 4;
-            processedMask.pixels[idx] = 0;     // R
-            processedMask.pixels[idx + 1] = 0; // G
-            processedMask.pixels[idx + 2] = 0; // B
-            processedMask.pixels[idx + 3] = maxAlpha; // A - use max alpha from kernel
+            const idx = (y * width + x) * 4;
+            graphicsBuffer.pixels[idx] = 0;
+            graphicsBuffer.pixels[idx + 1] = 0;
+            graphicsBuffer.pixels[idx + 2] = 0;
+            graphicsBuffer.pixels[idx + 3] = maxAlpha;
         }
     }
     
-    // Update pixels only once after all processing
-    processedMask.updatePixels();
-    
-    return processedMask;
+    graphicsBuffer.updatePixels();
+    return graphicsBuffer;
 }
 
 /**
- * Stop the body detection process
- * 
- * This cleanly stops the detection process and can be used when
- * transitioning between different phases of the application.
+ * Clean up resources to prevent memory leaks
  */
-function stopDetection() {
-    if (bodySegmentation) {
-        bodySegmentation.detectStop();
-        console.log("🛑 Body detection stopped");
+function disposeCaptureResources() {
+    if (graphicsBuffer) {
+        graphicsBuffer.remove();
+        graphicsBuffer = null;
     }
+    captureBodySegmentation = null;
 }
 
-/**
- * Check if the body segmentation system is ready
- * 
- * @returns {boolean} True if the system is initialized and ready
- */
-function isSegmentationReady() {
-    return bodySegmentation !== null && bodySegmentation !== undefined;
+function isCaptureReady() {
+    return captureBodySegmentation !== null && !captureInProgress;
 }
 
-/**
- * Get information about the current segmentation model
- * 
- * @returns {Object} Model information and status
- */
-function getSegmentationInfo() {
+function getCaptureInfo() {
     return {
-        ready: isSegmentationReady(),
-        options: segmentationOptions,
-        processingInterval: PROCESSING_INTERVAL
+        modelLoaded: captureBodySegmentation !== null,
+        captureInProgress: captureInProgress,
+        optimizedFor: "memory_efficient_capture"
     };
 }

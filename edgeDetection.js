@@ -1,9 +1,15 @@
 /*
  * edgeDetection.js - Advanced Edge Detection for Body Outlines
+ * PERFORMANCE OPTIMIZED VERSION
  * 
  * This module implements sophisticated edge detection techniques to extract
  * clean, drawable outlines from body segmentation masks. Think of this as
  * converting a "filled silhouette" into a "pencil outline."
+ * 
+ * CRITICAL PERFORMANCE OPTIMIZATION:
+ * All functions now work with pre-loaded pixel arrays instead of calling
+ * loadPixels() repeatedly. This eliminates expensive GPU-CPU memory transfers
+ * and dramatically improves frame rate performance.
  * 
  * Key Computer Vision Concepts:
  * - Edge detection finds boundaries between different regions
@@ -12,68 +18,84 @@
  * - Smoothing reduces noise while preserving important shape features
  * 
  * The process flows like this:
- * Segmentation Mask → Edge Detection → Contour Extraction → Smoothing → Drawable Path
+ * Pre-loaded Pixel Data → Edge Detection → Contour Extraction → Smoothing → Drawable Path
  */
 
 /**
- * Extract edges from a segmentation mask and return drawable path data
+ * OPTIMIZED: Extract edges from pre-loaded mask data instead of mask object
  * 
- * This is our main function that orchestrates the entire edge detection process.
- * We start with a binary mask (person = opaque, background = transparent) and
- * end with smooth, connected paths that represent the person's outline.
+ * This is the new entry point that accepts a maskData object containing
+ * pre-loaded pixels instead of a p5.Image that would require loading pixels again.
  * 
- * The multi-step process ensures we get clean, artistic-looking edges rather
- * than jaggy, pixelated boundaries.
+ * Think of this like receiving a pre-processed dataset instead of raw data
+ * that you'd have to process yourself - much more efficient.
  * 
- * @param {p5.Image} mask - The segmentation mask from body detection
+ * @param {Object} maskData - Object containing {mask, pixels, width, height}
  * @returns {Array} Array of edge paths, each containing connected points
+ */
+function extractEdgesFromMaskData(maskData) {
+    if (!maskData || !maskData.pixels || maskData.width === 0 || maskData.height === 0) {
+        return null;
+    }
+    
+    // Optimized edge detection pipeline - no console logging for performance
+    const edgeMap = detectEdgePixelsFromArray(maskData.pixels, maskData.width, maskData.height);
+    const contours = extractContours(edgeMap, maskData.width, maskData.height);
+    const smoothedContours = smoothContours(contours);
+    const filteredContours = filterContours(smoothedContours);
+    // filteredContours = removestraightLineArtifacts(filteredContours);
+
+    return filteredContours;
+}
+
+/**
+ * LEGACY WRAPPER: Extract edges from a mask object (for backward compatibility)
+ * 
+ * This function maintains compatibility with any code that still passes p5.Image masks.
+ * It loads the pixels once and then delegates to the optimized function.
+ * 
+ * However, for best performance, code should use extractEdgesFromMaskData() directly.
  */
 function extractEdgesFromMask(mask) {
     if (!mask || mask.width === 0 || mask.height === 0) {
         return null;
     }
     
-    console.log("🔍 Starting edge detection process...");
+    // Load pixels once and create maskData object
+    mask.loadPixels();
+    const maskData = {
+        mask: mask,
+        pixels: mask.pixels,
+        width: mask.width,
+        height: mask.height
+    };
     
-    // Step 1: Create an edge map using gradient detection
-    // This finds pixels where the mask changes from person to background
-    const edgeMap = detectEdgePixels(mask);
-    
-    // Step 2: Extract contours from the edge pixels
-    // This connects scattered edge pixels into continuous paths
-    const contours = extractContours(edgeMap, mask.width, mask.height);
-    
-    // Step 3: Smooth and optimize the contours
-    // This reduces noise and creates more natural-looking curves
-    const smoothedContours = smoothContours(contours);
-    
-    // Step 4: Filter out tiny contours that are likely noise
-    const filteredContours = filterContours(smoothedContours);
-    
-    // console.log(`✅ Edge detection complete: ${filteredContours.length} contours found`);
-    
-    return filteredContours;
+    // Delegate to the optimized function
+    return extractEdgesFromMaskData(maskData);
 }
 
 /**
- * Detect edge pixels using gradient-based edge detection
+ * OPTIMIZED: Detect edge pixels using pre-loaded pixel array
  * 
- * Edge detection works by finding places where the pixel values change rapidly.
- * In our case, we're looking for the boundary between the person (high alpha)
- * and the background (low alpha). This is similar to how your eye detects
- * the edge of an object - it's where one thing stops and another begins.
+ * This is the core optimization. Instead of calling mask.loadPixels() and then
+ * accessing mask.pixels repeatedly, we work directly with the pixel array that
+ * was loaded once upstream.
  * 
- * We use a Sobel-like operator, which is essentially asking:
- * "How different is this pixel from its neighbors?"
+ * Performance benefit: Eliminates redundant pixel loading operations that were
+ * happening every frame. This is like having all your tools laid out on a workbench
+ * instead of going to the toolbox every time you need something.
  * 
- * @param {p5.Image} mask - The segmentation mask
+ * The edge detection algorithm remains mathematically identical - we're just
+ * accessing the pixel data more efficiently.
+ * 
+ * @param {Uint8ClampedArray} pixels - Pre-loaded pixel array
+ * @param {number} width - Image width
+ * @param {number} height - Image height
  * @returns {Array} 2D array marking edge pixels
  */
-function detectEdgePixels(mask) {
-    mask.loadPixels(); // Load pixels ONCE for efficiency
+function detectEdgePixelsFromArray(pixels, width, height) {
+    // No need to call loadPixels() - we already have the pixel data!
     
-    const width = mask.width;
-    const height = mask.height;
     const edgeMap = Array(height).fill().map(() => Array(width).fill(false));
     
     // Define Sobel operators for detecting horizontal and vertical edges
@@ -92,8 +114,9 @@ function detectEdgePixels(mask) {
             // This calculates how much the alpha channel changes in X and Y directions
             for (let ky = -1; ky <= 1; ky++) {
                 for (let kx = -1; kx <= 1; kx++) {
+                    // PERFORMANCE CRITICAL: Direct pixel array access instead of image.get()
                     const pixelIdx = ((y + ky) * width + (x + kx)) * 4;
-                    const alpha = mask.pixels[pixelIdx + 3]; // Alpha channel
+                    const alpha = pixels[pixelIdx + 3]; // Alpha channel
                     
                     gradientX += alpha * sobelX[ky + 1][kx + 1];
                     gradientY += alpha * sobelY[ky + 1][kx + 1];
@@ -114,7 +137,21 @@ function detectEdgePixels(mask) {
 }
 
 /**
+ * LEGACY: Detect edge pixels from mask object (for backward compatibility)
+ * 
+ * This maintains the original function interface but now loads pixels only once
+ * and delegates to the optimized array-based function.
+ */
+function detectEdgePixels(mask) {
+    mask.loadPixels(); // Load once here
+    return detectEdgePixelsFromArray(mask.pixels, mask.width, mask.height);
+}
+
+/**
  * Extract contours from edge pixels using connected component analysis
+ * 
+ * This function doesn't need optimization because it doesn't work with pixel data directly.
+ * It operates on the abstract edge map that was created by the optimized edge detection.
  * 
  * Once we have individual edge pixels scattered around, we need to connect them
  * into continuous paths. Think of it like connecting dots in a dot-to-dot puzzle.
@@ -150,34 +187,16 @@ function extractContours(edgeMap, width, height) {
     return contours;
 }
 
-/**
- * Trace a single contour starting from an edge pixel
- * 
- * This function follows connected edge pixels to build a continuous path.
- * It's like following a trail of breadcrumbs, where each edge pixel leads
- * to the next connected edge pixel.
- * 
- * We use a flood-fill-like algorithm, but instead of filling an area,
- * we're recording the path we take.
- * 
- * @param {Array} edgeMap - 2D array of edge pixels
- * @param {Array} visited - 2D array tracking visited pixels
- * @param {number} startX - Starting X coordinate
- * @param {number} startY - Starting Y coordinate
- * @param {number} width - Image width
- * @param {number} height - Image height
- * @returns {Array} Array of connected points forming a contour
- */
 function traceContour(edgeMap, visited, startX, startY, width, height) {
     const contour = [];
     const stack = [{x: startX, y: startY}];
     
-    // Define 8-connected neighborhood (including diagonals)
-    // This means we can connect to any of the 8 adjacent pixels
+    // Simple 4-connected neighborhood (no diagonals to prevent artifacts)
     const directions = [
-        [-1, -1], [-1, 0], [-1, 1],
-        [0, -1],           [0, 1],
-        [1, -1],  [1, 0],  [1, 1]
+        [0, -1], // up
+        [1, 0],  // right
+        [0, 1],  // down
+        [-1, 0]  // left
     ];
     
     while (stack.length > 0) {
@@ -194,7 +213,7 @@ function traceContour(edgeMap, visited, startX, startY, width, height) {
         visited[y][x] = true;
         contour.push({x, y});
         
-        // Check all 8 neighbors for connected edge pixels
+        // Check 4-connected neighbors in a consistent order
         for (const [dx, dy] of directions) {
             const newX = x + dx;
             const newY = y + dy;
@@ -219,6 +238,9 @@ function traceContour(edgeMap, visited, startX, startY, width, height) {
  * We use a moving average filter, which replaces each point with the average
  * position of nearby points. This is like drawing with a steady hand instead
  * of a shaky one.
+ * 
+ * No optimization needed here since this works with abstract point coordinates,
+ * not pixel data.
  * 
  * @param {Array} contours - Array of raw contours
  * @returns {Array} Array of smoothed contours
@@ -253,26 +275,88 @@ function smoothContours(contours) {
 
 /**
  * Filter contours to remove noise and keep only significant outlines
+ * ENHANCED VERSION: More aggressive filtering to eliminate stray lines
  * 
- * Not all contours are created equal. Some represent the main body outline,
- * while others might be tiny artifacts from noise in the segmentation.
- * This function keeps only the contours that are likely to represent
- * meaningful parts of the person's silhouette.
+ * The key insight is that body outlines should be the longest, most substantial
+ * contours. Small internal artifacts and disconnected line segments should be
+ * filtered out aggressively to create clean, readable outlines.
+ * 
+ * Think of this like editing a sketch - we want the main bold strokes that
+ * define the form, not every tiny mark or smudge.
  * 
  * @param {Array} contours - Array of contours to filter
- * @returns {Array} Filtered array of significant contours
+ * @returns {Array} Filtered array of significant contours only
  */
 function filterContours(contours) {
-    // Sort contours by length (longer contours are more likely to be important)
+    if (contours.length === 0) return contours;
+    
+    // Sort contours by length (longer contours are more likely to be significant)
     contours.sort((a, b) => b.length - a.length);
     
-    // Filter criteria
-    const minLength = 20; // Minimum number of points in a significant contour
-    const maxContours = 5; // Maximum number of contours to keep
+    // Much more aggressive filtering criteria for cleaner results
+    const minLength = 50; // Increased minimum length to filter out small artifacts
+    const maxContours = 2; // Only keep the 1-2 longest contours (main body outline)
     
-    return contours
-        .filter(contour => contour.length >= minLength)
-        .slice(0, maxContours); // Keep only the longest, most significant contours
+    // Filter out short contours first
+    let significantContours = contours.filter(contour => contour.length >= minLength);
+    
+    // If we have contours, only keep the longest ones (main body outline)
+    if (significantContours.length > 0) {
+        // Additional filtering: only keep contours that are at least 30% as long as the longest
+        const longestLength = significantContours[0].length;
+        const lengthThreshold = longestLength * 0.3;
+        
+        significantContours = significantContours.filter(contour => 
+            contour.length >= lengthThreshold
+        );
+        
+        // Limit to maximum number of contours to prevent clutter
+        significantContours = significantContours.slice(0, maxContours);
+    }
+    
+    return significantContours;
+}
+
+/**
+ * Remove straight line artifacts from contours
+ * These are the unwanted diagonal lines you see cutting across the outline
+ */
+function removestraightLineArtifacts(contours) {
+    return contours.map(contour => {
+        if (contour.length < 10) return contour; // Too short to analyze
+        
+        let filteredPoints = [];
+        
+        for (let i = 0; i < contour.length; i++) {
+            let shouldKeep = true;
+            
+            // Look ahead and behind to detect straight line segments
+            if (i >= 4 && i < contour.length - 4) {
+                let startPoint = contour[i - 4];
+                let endPoint = contour[i + 4];
+                let currentPoint = contour[i];
+                
+                // Calculate if this section is too straight
+                let straightLineDistance = dist(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
+                let actualPathDistance = 0;
+                for (let j = i - 4; j < i + 4; j++) {
+                    actualPathDistance += dist(contour[j].x, contour[j].y, contour[j + 1].x, contour[j + 1].y);
+                }
+                
+                // If the path is almost perfectly straight, it's likely an artifact
+                let straightnessRatio = straightLineDistance / actualPathDistance;
+                if (straightnessRatio > 0.95) { // 95% straight = artifact
+                    shouldKeep = false;
+                }
+            }
+            
+            if (shouldKeep) {
+                filteredPoints.push(contour[i]);
+            }
+        }
+        
+        return filteredPoints;
+    }).filter(contour => contour.length > 20); // Remove contours that became too short
 }
 
 /**
@@ -281,6 +365,8 @@ function filterContours(contours) {
  * This function takes our processed contours and renders them visually.
  * It handles the artistic rendering of the detected edges, creating
  * the visual outline effect that users see.
+ * 
+ * No optimization needed here since this is a drawing operation, not pixel processing.
  * 
  * @param {Array} contours - Array of contours to draw
  * @param {p5.Color} edgeColor - Color to draw the edges
@@ -292,11 +378,19 @@ function drawEdges(contours, edgeColor, thickness = 2) {
     stroke(edgeColor);
     strokeWeight(thickness);
     noFill();
-    
+    // remove first and last contour
+    // console.log(contours)
+    // contours = contours;
+
+    // contours = contours.slice(1, contours.length - 1);
+    console.log(contours)
+
     // Draw each contour as a connected path
-    for (const contour of contours) {
+    for (let contour of contours) {
         if (contour.length < 2) continue;
-        
+        console.log(contour);
+            contour = contour.slice(1, contour.length - 1);
+
         beginShape();
         for (const point of contour) {
             vertex(point.x, point.y);
@@ -311,6 +405,8 @@ function drawEdges(contours, edgeColor, thickness = 2) {
  * This utility function provides insights into the edge detection results,
  * which can be helpful for debugging and understanding how well the
  * detection is working.
+ * 
+ * No optimization needed here since this is a utility/debugging function.
  * 
  * @param {Array} contours - Array of contours to analyze
  * @returns {Object} Analysis results

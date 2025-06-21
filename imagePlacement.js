@@ -1,519 +1,331 @@
 /*
- * imagePlacement.js - Advanced Rectangle Packing with Real Image Aspect Ratios
+ * imagePlacement.js - Growth-Based Keypoint Image System
+ * COMPLETELY SIMPLIFIED FOR THE NEW INTERACTION MODEL
  * 
- * Updated to work with actual loaded images, respecting their native proportions
- * while still optimizing placement within irregular body shapes.
+ * This file now focuses entirely on the simple growth-based interaction system.
+ * All the complex geometric placement algorithms have been removed since we're
+ * now using direct keypoint placement with growth mechanics.
+ * 
+ * The new approach is beautifully simple:
+ * 1. Images appear small on detected keypoints
+ * 2. They grow over time as the person stays engaged
+ * 3. When they reach full size, the interaction is "captured"
+ * 4. No complex geometric calculations needed
+ * 
+ * This makes the code much easier to understand, modify, and extend.
  */
 
-// Configuration constants for the placement algorithm
-const PLACEMENT_CONFIG = {
-    minImageSize: 80,        // Minimum size for any placed rectangle
-    maxImageSize: 320,       // Maximum size for any placed rectangle  
-    minSpacing: 8,           // Minimum distance between rectangles
-    maxAttempts: 50,        // More attempts since we're working with specific ratios
-    sampleDensity: 10,        // Slightly denser sampling for better placement
+// Configuration for the growth-based system
+const KEYPOINT_GROWTH_CONFIG = {
+    // Which body keypoints should have growing images
+    targetKeypoints: [
+        'nose',           // Head area - most stable keypoint
+        'left_shoulder',  'right_shoulder',  // Upper body
+        'left_elbow',     'right_elbow',     // Arms  
+        'left_wrist',     'right_wrist',     // Hands
+        'left_hip',       'right_hip',       // Lower body
+        'left_knee',      'right_knee'       // Legs
+    ],
+    
+    // Growth behavior parameters
+    minSize: 20,          // Starting size when image first appears
+    maxSize: 120,         // Full size when growth is complete
+    growthRate: 0.2,      // Size increase per second when person present
+    shrinkRate: 2.0,      // Size decrease per second when person absent
+    captureThreshold: 0.9, // What percentage of max size triggers capture
+    
+    // Keypoint confidence and timing
+    minConfidence: 0.3,   // Minimum ml5 confidence to trust a keypoint
+    gracePeriod: 500,     // Milliseconds to keep growing after person disappears
+    minKeypointsForCapture: 3, // How many mature keypoints needed to trigger capture
+    
+    // Visual variation for natural feel
+    positionJitter: 15,   // Random offset from exact keypoint position
+    sizeVariation: 20     // Random variation in final size
 };
 
 /**
- * Main function to place images optimally within a body outline
- * Now accepts an array of loaded images with their natural aspect ratios
+ * Extract target keypoints from a detected pose
  * 
- * @param {Array} contours - Array of contour paths defining the body outline
- * @param {Array} availableImages - Array of loaded p5.Image objects
- * @param {number} targetCount - Desired number of images to place
- * @returns {Array} Array of rectangle objects with position, size, and image assignment
+ * This function takes a raw pose from ml5.bodyPose and returns only the
+ * keypoints we want to use for image placement. This makes it easy to
+ * add or remove keypoints by simply modifying the targetKeypoints array.
+ * 
+ * Think of this like filtering a guest list - we have all the detected
+ * keypoints, but we only want to work with the ones that make sense
+ * for our interaction design.
+ * 
+ * @param {Object} pose - A single pose object from ml5.bodyPose
+ * @returns {Array} Filtered array of keypoints suitable for image placement
  */
-function placeImagesInBodyOutline(contours, availableImages = [], targetCount = 7) {
-    // console.log(`🎯 Starting image placement: targeting ${targetCount} images from ${availableImages.length} available`);
+function extractTargetKeypoints(pose) {
+    const validKeypoints = [];
     
-    if (!contours || contours.length === 0) {
-        // console.warn("⚠️ No contours provided for image placement");
-        return [];
-    }
-    
-    // Phase 1: Analyze the shape and identify valid placement areas
-    const shapeInfo = analyzeShapeGeometry(contours);
-    // console.log(`📐 Shape analysis: ${shapeInfo.validPoints.length} valid placement points found`);
-    
-    // Phase 2: Generate rectangle specifications based on actual image aspect ratios
-    const rectangleSpecs = generateImageBasedRectangleSet(shapeInfo, availableImages, targetCount);
-    // console.log(`📋 Generated ${rectangleSpecs.length} rectangle specifications from real images`);
-    
-    // Phase 3: Place rectangles using iterative optimization
-    const placedRectangles = placeRectanglesIteratively(rectangleSpecs, shapeInfo);
-    // console.log(`✅ Successfully placed ${placedRectangles.length} rectangles`);
-    
-    // Phase 4: Fine-tune positions for better visual distribution
-    const optimizedRectangles = optimizePlacement(placedRectangles, shapeInfo);
-    
-    return optimizedRectangles;
-}
-
-/**
- * Generate rectangle specifications based on actual loaded images
- * 
- * This is where we make the crucial shift from arbitrary rectangles to 
- * rectangles that match your real photographs. We calculate the aspect 
- * ratio of each image and create placement specifications that will 
- * preserve those natural proportions.
- * 
- * Think of this like a photo printing service - we want to scale your 
- * images to fit the available space, but never stretch or squash them 
- * in ways that would distort the original composition.
- * 
- * @param {Object} shapeInfo - Complete shape analysis data
- * @param {Array} availableImages - Array of loaded p5.Image objects
- * @param {number} targetCount - Desired number of rectangles
- * @returns {Array} Array of rectangle specifications with image assignments
- */
-function generateImageBasedRectangleSet(shapeInfo, availableImages, targetCount) {
-    const specs = [];
-    
-    // If no images are loaded, fall back to the original system
-    if (availableImages.length === 0) {
-        console.warn("No images loaded - using fallback rectangles");
-        return generateFallbackRectangleSet(shapeInfo, targetCount);
-    }
-    
-    // Calculate available space characteristics
-    const spaceValues = shapeInfo.spaceMap.map(p => p.localSpace);
-    const maxSpace = Math.max(...spaceValues);
-    const averageSpace = spaceValues.reduce((a, b) => a + b, 0) / spaceValues.length;
-    
-    // Create size distribution - we want variety in sizes for visual interest
-    const sizeDistribution = [
-        { ratio: 0.25, sizeMultiplier: 0.9 },  // 25% large images
-        { ratio: 0.45, sizeMultiplier: 0.7 },  // 45% medium images  
-        { ratio: 0.30, sizeMultiplier: 0.5 }   // 30% small images
-    ];
-    
-    for (const dist of sizeDistribution) {
-        const count = Math.round(targetCount * dist.ratio);
-        
-        for (let i = 0; i < count; i++) {
-            // Select a random image from available images
-            const selectedImage = availableImages[Math.floor(Math.random() * availableImages.length)];
+    // Check each keypoint in the pose against our target list
+    for (let keypoint of pose.keypoints) {
+        // Only include keypoints that are in our target list and have good confidence
+        if (KEYPOINT_GROWTH_CONFIG.targetKeypoints.includes(keypoint.name) && 
+            keypoint.confidence > KEYPOINT_GROWTH_CONFIG.minConfidence) {
             
-            // Calculate the natural aspect ratio of this image
-            const imageAspectRatio = selectedImage.width / selectedImage.height;
+            // Add some natural variation to the position for organic feel
+            const jitter = KEYPOINT_GROWTH_CONFIG.positionJitter;
+            const offsetX = (Math.random() - 0.5) * jitter;
+            const offsetY = (Math.random() - 0.5) * jitter;
             
-            // Determine base size from available space
-            const baseSize = Math.min(
-                Math.max(averageSpace * dist.sizeMultiplier, PLACEMENT_CONFIG.minImageSize),
-                PLACEMENT_CONFIG.maxImageSize
-            );
-            
-            // Create rectangle dimensions that preserve the image's aspect ratio
-            let rectWidth, rectHeight;
-            
-            if (imageAspectRatio > 1) {
-                // Landscape image - width is the limiting factor
-                rectWidth = baseSize;
-                rectHeight = baseSize / imageAspectRatio;
-            } else {
-                // Portrait or square image - height is the limiting factor  
-                rectHeight = baseSize;
-                rectWidth = baseSize * imageAspectRatio;
-            }
-            
-            specs.push({
-                width: rectWidth,
-                height: rectHeight,
-                aspectRatio: imageAspectRatio,
-                assignedImage: selectedImage,
-                priority: dist.sizeMultiplier,
-                originalImageWidth: selectedImage.width,
-                originalImageHeight: selectedImage.height
+            validKeypoints.push({
+                name: keypoint.name,
+                x: keypoint.x + offsetX,
+                y: keypoint.y + offsetY,
+                confidence: keypoint.confidence,
+                originalX: keypoint.x,  // Keep original for reference
+                originalY: keypoint.y
             });
         }
     }
     
-    // Sort by priority (larger rectangles get placed first for better packing)
-    specs.sort((a, b) => b.priority - a.priority);
-    
-    console.log(`Generated specs with aspect ratios: ${specs.map(s => s.aspectRatio.toFixed(2)).join(', ')}`);
-    
-    return specs;
+    return validKeypoints;
 }
 
 /**
- * Fallback rectangle generation when no images are available
+ * Create a new growing image object for a keypoint
  * 
- * This preserves the original functionality for development and testing,
- * creating rectangles with pleasant proportions even without loaded images.
- */
-function generateFallbackRectangleSet(shapeInfo, targetCount) {
-    const specs = [];
-    const spaceValues = shapeInfo.spaceMap.map(p => p.localSpace);
-    const maxSpace = Math.max(...spaceValues);
-    const averageSpace = spaceValues.reduce((a, b) => a + b, 0) / spaceValues.length;
-    
-    // Use pleasing aspect ratios for fallback rectangles
-    const fallbackAspectRatios = [1.0, 1.5, 0.67, 1.33, 0.8, 1.25];
-    
-    const sizeDistribution = [
-        { ratio: 0.3, sizeMultiplier: 0.8 },
-        { ratio: 0.4, sizeMultiplier: 0.6 },
-        { ratio: 0.3, sizeMultiplier: 0.4 }
-    ];
-    
-    for (const dist of sizeDistribution) {
-        const count = Math.round(targetCount * dist.ratio);
-        
-        for (let i = 0; i < count; i++) {
-            const baseSize = Math.min(
-                Math.max(averageSpace * dist.sizeMultiplier, PLACEMENT_CONFIG.minImageSize),
-                PLACEMENT_CONFIG.maxImageSize
-            );
-            
-            const aspectRatio = fallbackAspectRatios[Math.floor(Math.random() * fallbackAspectRatios.length)];
-            
-            specs.push({
-                width: baseSize * aspectRatio,
-                height: baseSize / aspectRatio,
-                aspectRatio: aspectRatio,
-                assignedImage: null, // No image assigned
-                priority: dist.sizeMultiplier
-            });
-        }
-    }
-    
-    specs.sort((a, b) => b.priority - a.priority);
-    return specs;
-}
-
-/**
- * Enhanced rectangle placement validation for image-based rectangles
+ * This function initializes all the properties needed to track an image
+ * as it grows on a keypoint. Each growing image is like a living entity
+ * that knows its current state and how to change over time.
  * 
- * This builds on the existing validation but adds considerations specific
- * to working with real images that have fixed aspect ratios.
+ * Think of this like planting a seed - we're setting up everything the
+ * seed needs to grow into a full-sized plant over time.
+ * 
+ * @param {Object} keypoint - The keypoint where this image will grow
+ * @param {Array} availableImages - Pool of images to choose from
+ * @returns {Object} A complete growing image object
  */
-function isRectanglePlacementValid(rectangle, existingRectangles, shapeInfo) {
-    // All the original validation still applies
-    if (!isRectangleInsideShape(rectangle, shapeInfo.contours)) {
-        return false;
-    }
+function createGrowingImageAtKeypoint(keypoint, availableImages) {
+    // Add some variation to the final target size for visual interest
+    const sizeVariation = KEYPOINT_GROWTH_CONFIG.sizeVariation;
+    const baseSize = KEYPOINT_GROWTH_CONFIG.maxSize;
+    const targetSize = baseSize + (Math.random() - 0.5) * sizeVariation;
     
-    if (hasRectangleCollision(rectangle, existingRectangles)) {
-        return false;
-    }
-    
-    if (!maintainsMinimumSpacing(rectangle, existingRectangles)) {
-        return false;
-    }
-    
-    // Additional validation: ensure rectangle isn't too small to be meaningful
-    const minArea = PLACEMENT_CONFIG.minImageSize * PLACEMENT_CONFIG.minImageSize * 0.5;
-    if (rectangle.width * rectangle.height < minArea) {
-        return false;
-    }
-    
-    return true;
-}
-
-// Keep all the existing utility functions unchanged - they work perfectly
-// These include:
-// - analyzeShapeGeometry()
-// - calculateBoundingBox() 
-// - sampleInteriorSpace()
-// - isPointInsideShape()
-// - calculateLocalSpaceAvailability()
-// - placeRectanglesIteratively()
-// - isRectangleInsideShape()
-// - hasRectangleCollision()
-// - maintainsMinimumSpacing()
-// - optimizePlacement()
-// - identifySpaceClusters()
-// - estimateShapeArea()
-
-// [Previous utility functions remain exactly the same - no changes needed]
-
-/**
- * Analyze the geometric properties of the body outline shape
- */
-function analyzeShapeGeometry(contours) {
-    const bounds = calculateBoundingBox(contours);
-    const validPoints = sampleInteriorSpace(contours, bounds);
-    const spaceMap = calculateLocalSpaceAvailability(validPoints, contours, bounds);
-    const spaceClusters = identifySpaceClusters(spaceMap);
+    // Select a random image from the available pool
+    const selectedImage = availableImages.length > 0 ? 
+        availableImages[Math.floor(Math.random() * availableImages.length)] : null;
     
     return {
-        bounds: bounds,
-        validPoints: validPoints,
-        spaceMap: spaceMap,
-        spaceClusters: spaceClusters,
-        contours: contours,
-        totalArea: estimateShapeArea(contours, bounds)
+        // Identity and position
+        keypointName: keypoint.name,
+        x: keypoint.x,
+        y: keypoint.y,
+        originalX: keypoint.originalX,
+        originalY: keypoint.originalY,
+        
+        // Growth state
+        currentSize: KEYPOINT_GROWTH_CONFIG.minSize,
+        targetSize: targetSize,
+        isGrowing: true,
+        hasTriggeredCapture: false,
+        
+        // Visual properties
+        image: selectedImage,
+        aspectRatio: selectedImage ? selectedImage.width / selectedImage.height : 1,
+        opacity: 1.0,
+        
+        // Timing and tracking
+        creationTime: millis(),
+        lastUpdateTime: millis(),
+        lastSeenTime: millis(),
+        confidence: keypoint.confidence
     };
 }
 
-function calculateBoundingBox(contours) {
-    let minX = Infinity, minY = Infinity;
-    let maxX = -Infinity, maxY = -Infinity;
+/**
+ * Update the growth state of an existing growing image
+ * 
+ * This function handles the core growth mechanics - making images bigger
+ * when the person is present and smaller when they're absent. It's like
+ * tending a garden, where each plant grows or shrinks based on conditions.
+ * 
+ * @param {Object} growingImage - The image object to update
+ * @param {boolean} isPersonPresent - Whether the person is currently detected
+ * @param {number} deltaTime - Time since last update in milliseconds
+ * @returns {Object} Updated growing image object
+ */
+function updateGrowingImage(growingImage, isPersonPresent, deltaTime) {
+    const deltaSeconds = deltaTime / 1000; // Convert to seconds for easier math
     
-    for (const contour of contours) {
-        for (const point of contour) {
-            minX = Math.min(minX, point.x);
-            minY = Math.min(minY, point.y);
-            maxX = Math.max(maxX, point.x);
-            maxY = Math.max(maxY, point.y);
-        }
+    if (isPersonPresent) {
+        // Person is present - grow the image toward its target size
+        const growthAmount = KEYPOINT_GROWTH_CONFIG.growthRate * deltaSeconds;
+        growingImage.currentSize += growthAmount;
+        
+        // Cap at target size
+        growingImage.currentSize = Math.min(growingImage.currentSize, growingImage.targetSize);
+        
+        // Update timing
+        growingImage.lastSeenTime = millis();
+        growingImage.isGrowing = growingImage.currentSize < growingImage.targetSize;
+        
+    } else {
+        // Person not present - shrink the image
+        const shrinkAmount = KEYPOINT_GROWTH_CONFIG.shrinkRate * deltaSeconds;
+        growingImage.currentSize -= shrinkAmount;
+        
+        // Don't let it go below zero
+        growingImage.currentSize = Math.max(growingImage.currentSize, 0);
+        growingImage.isGrowing = false;
     }
     
-    return {
-        x: minX,
-        y: minY,
-        width: maxX - minX,
-        height: maxY - minY
-    };
+    growingImage.lastUpdateTime = millis();
+    return growingImage;
 }
 
-function sampleInteriorSpace(contours, bounds) {
-    const validPoints = [];
-    const step = PLACEMENT_CONFIG.sampleDensity;
-    
-    for (let y = bounds.y; y < bounds.y + bounds.height; y += step) {
-        for (let x = bounds.x; x < bounds.x + bounds.width; x += step) {
-            if (isPointInsideShape(x, y, contours)) {
-                validPoints.push({x, y, localSpace: 0});
-            }
-        }
-    }
-    
-    return validPoints;
+/**
+ * Check if a growing image has reached the capture threshold
+ * 
+ * This function determines when an image has grown large enough to trigger
+ * the capture process. It's like checking if a fruit is ripe enough to pick.
+ * 
+ * @param {Object} growingImage - The image to check
+ * @returns {boolean} True if the image is ready for capture
+ */
+function isReadyForCapture(growingImage) {
+    const growthProgress = growingImage.currentSize / growingImage.targetSize;
+    return growthProgress >= KEYPOINT_GROWTH_CONFIG.captureThreshold && 
+           !growingImage.hasTriggeredCapture;
 }
 
-function isPointInsideShape(testX, testY, contours) {
-    if (contours.length === 0) return false;
-    
-    const mainContour = contours.reduce((largest, current) => 
-        current.length > largest.length ? current : largest
-    );
-    
-    let intersectionCount = 0;
-    
-    for (let i = 0; i < mainContour.length; i++) {
-        const current = mainContour[i];
-        const next = mainContour[(i + 1) % mainContour.length];
-        
-        if (((current.y > testY) !== (next.y > testY)) &&
-            (testX < (next.x - current.x) * (testY - current.y) / (next.y - current.y) + current.x)) {
-            intersectionCount++;
-        }
-    }
-    
-    return intersectionCount % 2 === 1;
+/**
+ * Check if we have enough mature images to trigger a full capture
+ * 
+ * This function looks at all the growing images and determines if enough
+ * of them have matured to warrant capturing the entire interaction.
+ * 
+ * Think of this like waiting for enough flowers in a garden to bloom
+ * before taking a photograph of the whole garden.
+ * 
+ * @param {Array} growingImages - Array of all current growing images
+ * @returns {boolean} True if we should trigger a capture moment
+ */
+function shouldTriggerCapture(growingImages) {
+    const readyImages = growingImages.filter(isReadyForCapture);
+    return readyImages.length >= KEYPOINT_GROWTH_CONFIG.minKeypointsForCapture;
 }
 
-function calculateLocalSpaceAvailability(validPoints, contours, bounds) {
-    return validPoints.map(point => {
-        const testDirections = [
-            {dx: 1, dy: 0}, {dx: -1, dy: 0}, {dx: 0, dy: 1}, {dx: 0, dy: -1},
-            {dx: 1, dy: 1}, {dx: -1, dy: -1}, {dx: 1, dy: -1}, {dx: -1, dy: 1}
-        ];
-        
-        let totalSpace = 0;
-        
-        for (const direction of testDirections) {
-            let distance = 0;
-            let testX = point.x;
-            let testY = point.y;
-            
-            while (distance < 100 && isPointInsideShape(testX, testY, contours)) {
-                distance += 2;
-                testX += direction.dx * 2;
-                testY += direction.dy * 2;
-            }
-            
-            totalSpace += distance;
-        }
-        
-        const averageSpace = totalSpace / testDirections.length;
+/**
+ * Convert growing images to frozen commemorative images
+ * 
+ * When we capture an interaction, the growing images become frozen
+ * commemorative elements that remain permanently on the canvas.
+ * This function handles that transformation.
+ * 
+ * Think of this like pressing flowers - we're preserving the current
+ * state of the growing images so they become lasting memories.
+ * 
+ * @param {Array} growingImages - Current growing images to freeze
+ * @returns {Array} Frozen commemorative image objects
+ */
+function freezeImagesForCommemoration(growingImages) {
+    return growingImages.map(growingImage => {
+        // Calculate final display dimensions maintaining aspect ratio
+        let displayWidth = growingImage.currentSize * growingImage.aspectRatio;
+        let displayHeight = growingImage.currentSize;
         
         return {
-            x: point.x,
-            y: point.y,
-            localSpace: averageSpace
+            // Position (centered on keypoint)
+            x: growingImage.x - displayWidth / 2,
+            y: growingImage.y - displayHeight / 2,
+            width: displayWidth,
+            height: displayHeight,
+            
+            // Visual properties
+            image: growingImage.image,
+            opacity: 1.0,
+            
+            // Metadata for tracking
+            type: 'frozen_commemorative_image',
+            originalKeypointName: growingImage.keypointName,
+            captureTime: millis(),
+            finalSize: growingImage.currentSize
         };
     });
 }
 
-function placeRectanglesIteratively(specs, shapeInfo) {
-    const placedRectangles = [];
+/**
+ * Draw a single growing image on the canvas
+ * 
+ * This function handles the visual rendering of growing images, including
+ * maintaining proper aspect ratios and centering on keypoints.
+ * 
+ * @param {Object} growingImage - The growing image to draw
+ */
+function drawGrowingImage(growingImage) {
+    if (!growingImage.image || growingImage.currentSize <= 0) return;
     
-    for (let specIndex = 0; specIndex < specs.length; specIndex++) {
-        const spec = specs[specIndex];
-        let placed = false;
-        let attempts = 0;
-        let currentWidth = spec.width;
-        let currentHeight = spec.height;
-        
-        while (!placed && attempts < PLACEMENT_CONFIG.maxAttempts) {
-            attempts++;
-            
-            const candidatePoints = shapeInfo.spaceMap.filter(p => 
-                p.localSpace >= Math.min(currentWidth, currentHeight) / 2
-            );
-            
-            if (candidatePoints.length === 0) {
-                // Maintain aspect ratio while scaling down
-                const scaleFactor = 0.9;
-                currentWidth *= scaleFactor;
-                currentHeight *= scaleFactor;
-                
-                if (currentWidth < PLACEMENT_CONFIG.minImageSize) {
-                    console.log(`⚠️ Could not place rectangle ${specIndex} - no suitable space`);
-                    break;
-                }
-                continue;
-            }
-            
-            const centerPoint = candidatePoints[Math.floor(Math.random() * candidatePoints.length)];
-            
-            const rectangle = {
-                x: centerPoint.x - currentWidth / 2,
-                y: centerPoint.y - currentHeight / 2,
-                width: currentWidth,
-                height: currentHeight,
-                centerX: centerPoint.x,
-                centerY: centerPoint.y,
-                assignedImage: spec.assignedImage, // Carry the image assignment forward
-                aspectRatio: spec.aspectRatio
-            };
-            
-            if (isRectanglePlacementValid(rectangle, placedRectangles, shapeInfo)) {
-                placedRectangles.push(rectangle);
-                placed = true;
-                console.log(`✅ Placed image rectangle ${specIndex} at (${Math.round(rectangle.x)}, ${Math.round(rectangle.y)})`);
-            }
-        }
-        
-        if (!placed) {
-            console.log(`❌ Failed to place rectangle ${specIndex} after ${attempts} attempts`);
-        }
-    }
+    // Calculate display dimensions maintaining aspect ratio
+    let displayWidth = growingImage.currentSize * growingImage.aspectRatio;
+    let displayHeight = growingImage.currentSize;
     
-    return placedRectangles;
+    // Draw image centered on keypoint position
+    image(growingImage.image,
+          growingImage.x - displayWidth / 2,
+          growingImage.y - displayHeight / 2,
+          displayWidth,
+          displayHeight);
 }
 
-function isRectangleInsideShape(rectangle, contours) {
-    const corners = [
-        {x: rectangle.x, y: rectangle.y},
-        {x: rectangle.x + rectangle.width, y: rectangle.y},
-        {x: rectangle.x, y: rectangle.y + rectangle.height},
-        {x: rectangle.x + rectangle.width, y: rectangle.y + rectangle.height}
-    ];
+/**
+ * Draw a frozen commemorative image
+ * 
+ * This function draws images that have been captured and frozen in place
+ * as permanent commemorative elements.
+ * 
+ * @param {Object} frozenImage - The frozen image to draw
+ */
+function drawFrozenImage(frozenImage) {
+    if (!frozenImage.image) return;
     
-    for (const corner of corners) {
-        if (!isPointInsideShape(corner.x, corner.y, contours)) {
-            return false;
-        }
+    // Apply opacity for fading effects if needed
+    if (frozenImage.opacity < 1.0) {
+        tint(255, frozenImage.opacity * 255);
     }
     
-    const edgeMidpoints = [
-        {x: rectangle.x + rectangle.width/2, y: rectangle.y},
-        {x: rectangle.x + rectangle.width/2, y: rectangle.y + rectangle.height},
-        {x: rectangle.x, y: rectangle.y + rectangle.height/2},
-        {x: rectangle.x + rectangle.width, y: rectangle.y + rectangle.height/2}
-    ];
+    // Draw the frozen image at its captured position and size
+    image(frozenImage.image,
+          frozenImage.x,
+          frozenImage.y,
+          frozenImage.width,
+          frozenImage.height);
     
-    for (const point of edgeMidpoints) {
-        if (!isPointInsideShape(point.x, point.y, contours)) {
-            return false;
-        }
+    // Reset tint
+    if (frozenImage.opacity < 1.0) {
+        noTint();
     }
-    
-    const center = {x: rectangle.x + rectangle.width/2, y: rectangle.y + rectangle.height/2};
-    return isPointInsideShape(center.x, center.y, contours);
 }
 
-function hasRectangleCollision(rectangle, existingRectangles) {
-    for (const existing of existingRectangles) {
-        const xOverlap = rectangle.x < existing.x + existing.width && 
-                        rectangle.x + rectangle.width > existing.x;
-        
-        const yOverlap = rectangle.y < existing.y + existing.height && 
-                        rectangle.y + rectangle.height > existing.y;
-        
-        if (xOverlap && yOverlap) {
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-function maintainsMinimumSpacing(rectangle, existingRectangles) {
-    const minSpacing = PLACEMENT_CONFIG.minSpacing;
-    
-    for (const existing of existingRectangles) {
-        const xDistance = Math.max(0, 
-            Math.max(rectangle.x - (existing.x + existing.width),
-                    existing.x - (rectangle.x + rectangle.width)));
-        
-        const yDistance = Math.max(0,
-            Math.max(rectangle.y - (existing.y + existing.height),
-                    existing.y - (rectangle.y + rectangle.height)));
-        
-        const actualDistance = (xDistance === 0 || yDistance === 0) ?
-            Math.max(xDistance, yDistance) :
-            Math.sqrt(xDistance * xDistance + yDistance * yDistance);
-        
-        if (actualDistance < minSpacing) {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-function optimizePlacement(rectangles, shapeInfo) {
-    const optimized = rectangles.map(rect => ({...rect}));
-    
-    const centerOfMass = {
-        x: optimized.reduce((sum, rect) => sum + rect.centerX, 0) / optimized.length,
-        y: optimized.reduce((sum, rect) => sum + rect.centerY, 0) / optimized.length
+/**
+ * Get configuration information for debugging and tuning
+ * 
+ * This utility function returns the current configuration, which is helpful
+ * for debugging and allowing easy adjustments to the growth behavior.
+ * 
+ * @returns {Object} Current configuration settings
+ */
+function getGrowthConfig() {
+    return {
+        ...KEYPOINT_GROWTH_CONFIG,
+        totalTargetKeypoints: KEYPOINT_GROWTH_CONFIG.targetKeypoints.length,
+        systemType: 'growth_based_keypoint_placement'
     };
-    
-    for (let i = 0; i < optimized.length; i++) {
-        const rect = optimized[i];
-        
-        const dx = rect.centerX - centerOfMass.x;
-        const dy = rect.centerY - centerOfMass.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance > 0) {
-            const adjustmentStrength = 3;
-            const adjustX = (dx / distance) * adjustmentStrength;
-            const adjustY = (dy / distance) * adjustmentStrength;
-            
-            const adjustedRect = {
-                x: rect.x + adjustX,
-                y: rect.y + adjustY,
-                width: rect.width,
-                height: rect.height,
-                centerX: rect.centerX + adjustX,
-                centerY: rect.centerY + adjustY,
-                assignedImage: rect.assignedImage,
-                aspectRatio: rect.aspectRatio
-            };
-            
-            if (isRectanglePlacementValid(adjustedRect, 
-                optimized.filter((_, index) => index !== i), shapeInfo)) {
-                optimized[i] = adjustedRect;
-            }
-        }
-    }
-    
-    console.log(`🔧 Placement optimization complete`);
-    return optimized;
 }
 
-function identifySpaceClusters(spaceMap) {
-    return spaceMap.filter(point => point.localSpace > 30)
-                  .sort((a, b) => b.localSpace - a.localSpace);
-}
-
-function estimateShapeArea(contours, bounds) {
-    return bounds.width * bounds.height * 0.6;
+/**
+ * Update configuration values dynamically
+ * 
+ * This function allows you to adjust the growth behavior without restarting
+ * the application, which is useful for fine-tuning during development.
+ * 
+ * @param {Object} newConfig - Configuration values to update
+ */
+function updateGrowthConfig(newConfig) {
+    Object.assign(KEYPOINT_GROWTH_CONFIG, newConfig);
+    // console.log("🔧 Growth configuration updated:", newConfig);
 }

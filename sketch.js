@@ -1,72 +1,84 @@
 /*
- * Simplified sketch.js - Continuous body outline installation
+ * Countdown-Based Interactive Body Installation
+ * SIMPLIFIED INTERACTION MODEL
  * 
- * This creates a seamless, always-running experience where:
- * - People walk into view and see their outline
- * - Images are placed automatically after brief stability
- * - Experience continues indefinitely without manual resets
- * - Old images fade away to prevent screen clutter
+ * Interaction Flow:
+ * 1. Person detected → bright green keypoints appear
+ * 2. 3-second countdown with keypoints fading from green to black
+ * 3. When countdown completes → capture outline + place images simultaneously
+ * 4. Store as single commemorative object for efficient management
+ * 5. Keep only most recent interactions, remove older ones
+ * 
+ * This approach is much simpler and more predictable than growth-based system
  */
 
-// Canvas dimensions optimized for webcam input
+// ========== EASILY CONFIGURABLE VARIABLES ==========
+const COUNTDOWN_DURATION = 3000; // 3 seconds - CHANGE THIS to adjust countdown time
+const MAX_COMMEMORATIVE_OBJECTS = 100; // CHANGE THIS to adjust how many to keep
+const KEYPOINT_FADE_START_COLOR = [0, 255, 0]; // Bright green
+const KEYPOINT_FADE_END_COLOR = [0, 0, 0]; // Black
+const KEYPOINT_DOT_SIZE = 12; // Size of countdown dots
+
+// Canvas dimensions
 const CANVAS_WIDTH = 640;
 const CANVAS_HEIGHT = 480;
 
-// Experience flow constants
-const STABILITY_TIME = 3000; // 3 seconds of stable detection before placement
-const MIN_PERSON_AREA = 5000; // Minimum area to consider valid detection
-const MAX_IMAGES_ON_SCREEN = 20; // Maximum images before fading begins
-const IMAGE_FADE_RATE = 0.02; // How fast old images fade away
-
-// Simple state management
-let isPersonDetected = false;
-let detectionStartTime = 0;
-let consecutiveDetections = 0;
-
-// Visual elements
+// System state - simplified for countdown model
 let video;
-let currentEdges = null;
-let placedImages = []; // Array of placed image objects with fade properties
-let availableImages = []; // Array of loaded image assets
+let bodyPose;
+let poses = [];
+let availableImages = [];
+
+// Countdown interaction state
+let currentCountdown = null; // Single countdown object or null
+let commemorativeObjects = []; // Array of completed interaction objects
+
+// Countdown object structure:
+// {
+//   keypoints: [],           // positions and current colors
+//   startTime: number,       // when countdown began
+//   isActive: boolean        // whether countdown is running
+// }
+
+// Commemorative object structure:
+// {
+//   outline: [],             // edge contours
+//   images: [],              // placed images with positions
+//   captureTime: number,     // when this was captured
+//   id: number               // unique identifier
+// }
+
+let nextObjectId = 1; // For tracking commemorative objects
+
+function preload() {
+    bodyPose = ml5.bodyPose();
+}
 
 function setup() {
-    // Create fullscreen-ready canvas
     let canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
     canvas.parent('canvas-container');
     
-    // Initialize video capture
     video = createCapture(VIDEO);
     video.size(CANVAS_WIDTH, CANVAS_HEIGHT);
     video.hide();
     
-    // Load available images from the images folder
     loadAvailableImages();
-    
-    // Initialize body segmentation (keeping the existing working code)
-    initializeBodySegmentation(video, onSegmentationResult);
-    
-    console.log("Installation started - waiting for people to interact");
+    bodyPose.detectStart(video, gotPoses);
 }
 
 function draw() {
-    // Always white background for clean installation aesthetic
+    // Clear background each frame to prevent dot accumulation
     background(255);
     
-    // Draw all placed images with their current opacity
-    drawPlacedImages();
+    // Draw all commemorative objects (outlines and images from past interactions)
+    drawCommemorativeObjects();
     
-    // Draw the current person's outline if detected
-    if (currentEdges) {
-        drawEdges(currentEdges, color(0), 2);
-    }
-    
-    // Handle image fading when screen gets too full
-    manageImageFading();
+    // Handle current countdown interaction
+    updateCountdown();
+    drawCountdownKeypoints();
 }
 
-
 function loadAvailableImages() {
-    // Your specific image filenames from the uploaded directory
     const imageFilenames = [
         '5W3A3139.JPG', '5W3A3140.JPG', '5W3A3141.JPG', '5W3A3142.JPG', 
         '5W3A3143.JPG', '5W3A3144.JPG', '5W3A3145.JPG', '5W3A3146.JPG',
@@ -75,164 +87,279 @@ function loadAvailableImages() {
         '5W3A3155.JPG', '5W3A3156.JPG'
     ];
     
-    console.log("Loading images from images/ folder...");
-    
-    // Load each image and add to availableImages array when successful
     for (let filename of imageFilenames) {
         loadImage(`images/${filename}`, 
-            (img) => {
-                availableImages.push(img);
-                console.log(`✅ Loaded: ${filename} (${img.width}x${img.height}, ratio: ${(img.width/img.height).toFixed(2)})`);
-            },
-            (err) => {
-                console.warn(`⚠️ Could not load: ${filename}`);
-            }
+            (img) => availableImages.push(img)
         );
     }
 }
 
-function onSegmentationResult(segmentation) {
-    if (!segmentation || !segmentation.mask) {
-        handleNoDetection();
+/**
+ * Handle pose detection results from bodyPose
+ * This starts or updates the countdown when a person is detected
+ */
+function gotPoses(results) {
+    poses = results;
+    
+    if (poses.length > 0) {
+        // Person detected - start or update countdown
+        handlePersonDetected(poses[0]);
+    } else {
+        // No person - stop countdown if it was running
+        handleNoPersonDetected();
+    }
+}
+
+/**
+ * Start countdown when person first detected, or update keypoint positions
+ */
+function handlePersonDetected(pose) {
+    // Extract the keypoints we want to use for the countdown/placement
+    const targetKeypoints = extractTargetKeypoints(pose);
+    
+    if (targetKeypoints.length < 3) {
+        // Not enough reliable keypoints - don't start countdown
         return;
     }
     
-    // Extract edges and calculate person area
-    currentEdges = extractEdgesFromMask(segmentation.mask);
-    let personArea = calculatePersonArea(segmentation.mask);
-    
-    // Check if detection is valid and stable
-    if (personArea > MIN_PERSON_AREA) {
-        handlePersonDetected();
+    if (!currentCountdown || !currentCountdown.isActive) {
+        // Start new countdown
+        startCountdown(targetKeypoints);
     } else {
-        handleNoDetection();
+        // Update existing countdown with new keypoint positions
+        updateCountdownKeypoints(targetKeypoints);
     }
 }
 
-function handlePersonDetected() {
-    if (!isPersonDetected) {
-        // First detection - start stability timer
-        isPersonDetected = true;
-        detectionStartTime = millis();
-        consecutiveDetections = 1;
-        console.log("Person detected - checking stability");
-    } else {
-        // Continue tracking stability
-        consecutiveDetections++;
+/**
+ * Stop countdown when person leaves
+ */
+function handleNoPersonDetected() {
+    if (currentCountdown && currentCountdown.isActive) {
+        // Person left during countdown - cancel it
+        currentCountdown = null;
+    }
+}
+
+/**
+ * Extract target keypoints for countdown and eventual image placement
+ */
+function extractTargetKeypoints(pose) {
+    const targetNames = [
+        'nose',           // Head
+        'left_shoulder', 'right_shoulder',
+        'left_elbow', 'right_elbow',
+        'left_wrist', 'right_wrist',
+        'left_hip', 'right_hip'
+    ];
+    
+    const validKeypoints = [];
+    
+    for (let targetName of targetNames) {
+        let keypoint = pose.keypoints.find(kp => 
+            kp.name === targetName && kp.confidence > 0.4
+        );
         
-        // Check if person has been stable long enough for placement
-        if (millis() - detectionStartTime >= STABILITY_TIME && consecutiveDetections > 20) {
-            placeImagesForCurrentPerson();
-            // Reset detection to allow for new people
-            isPersonDetected = false;
-            consecutiveDetections = 0;
+        if (keypoint) {
+            validKeypoints.push({
+                name: keypoint.name,
+                x: keypoint.x,
+                y: keypoint.y,
+                confidence: keypoint.confidence,
+                currentColor: [...KEYPOINT_FADE_START_COLOR] // Start with bright green
+            });
+        }
+    }
+    
+    return validKeypoints;
+}
+
+/**
+ * Start a new countdown interaction
+ */
+function startCountdown(keypoints) {
+    currentCountdown = {
+        keypoints: keypoints,
+        startTime: millis(),
+        isActive: true
+    };
+}
+
+/**
+ * Update keypoint positions during countdown (smooth movement)
+ */
+function updateCountdownKeypoints(newKeypoints) {
+    if (!currentCountdown || !currentCountdown.isActive) return;
+    
+    // Update positions of existing keypoints smoothly
+    for (let existingKp of currentCountdown.keypoints) {
+        let newKp = newKeypoints.find(kp => kp.name === existingKp.name);
+        if (newKp) {
+            // Smooth position interpolation
+            existingKp.x = lerp(existingKp.x, newKp.x, 0.3);
+            existingKp.y = lerp(existingKp.y, newKp.y, 0.3);
+            existingKp.confidence = newKp.confidence;
         }
     }
 }
 
-function handleNoDetection() {
-    // Person left or no detection - clear outline but keep placed images
-    isPersonDetected = false;
-    consecutiveDetections = 0;
-    currentEdges = null;
-}
-
-function placeImagesForCurrentPerson() {
-    if (!currentEdges) return;
+/**
+ * Update countdown progress and check for completion
+ */
+function updateCountdown() {
+    if (!currentCountdown || !currentCountdown.isActive) return;
     
-    console.log("Placing images for detected person");
+    const elapsed = millis() - currentCountdown.startTime;
+    const progress = elapsed / COUNTDOWN_DURATION; // 0 to 1
     
-    // Pass the loaded images to the placement algorithm
-    let rectanglePositions = placeImagesInBodyOutline(currentEdges, availableImages, 6);
-    
-    // Convert rectangles to image objects with fade properties
-    for (let rect of rectanglePositions) {
-        let imageObj = {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-            opacity: 1.0,
-            image: rect.assignedImage, // Use the image assigned by the placement algorithm
-            birthTime: millis(),
-            aspectRatio: rect.aspectRatio
-        };
-        
-        placedImages.push(imageObj);
+    if (progress >= 1.0) {
+        // Countdown complete - capture this interaction
+        captureInteraction();
+        currentCountdown = null;
+    } else {
+        // Update keypoint colors based on countdown progress
+        updateKeypointColors(progress);
     }
-    
-    console.log(`Placed ${rectanglePositions.length} images, total on screen: ${placedImages.length}`);
 }
 
-function getRandomImage() {
-    // Return a random image from available images, or null if none loaded
-    if (availableImages.length > 0) {
-        return random(availableImages);
+/**
+ * Update keypoint colors from green to black based on countdown progress
+ */
+function updateKeypointColors(progress) {
+    for (let keypoint of currentCountdown.keypoints) {
+        // Interpolate color from start to end based on progress
+        keypoint.currentColor[0] = lerp(KEYPOINT_FADE_START_COLOR[0], KEYPOINT_FADE_END_COLOR[0], progress);
+        keypoint.currentColor[1] = lerp(KEYPOINT_FADE_START_COLOR[1], KEYPOINT_FADE_END_COLOR[1], progress);
+        keypoint.currentColor[2] = lerp(KEYPOINT_FADE_START_COLOR[2], KEYPOINT_FADE_END_COLOR[2], progress);
     }
-    return null;
 }
 
-function drawPlacedImages() {
-    for (let img of placedImages) {
-        // Set opacity for fading effect
-        tint(255, img.opacity * 255);
-        
-        if (img.image) {
-            // Draw the actual loaded image, preserving its aspect ratio
-            // The rectangle dimensions already respect the aspect ratio from placement
-            image(img.image, img.x, img.y, img.width, img.height);
-        } else {
-            // Fallback: draw colored rectangle if image failed to load
-            fill(random(50, 200), random(50, 200), random(50, 200), img.opacity * 255);
-            noStroke();
-            rect(img.x, img.y, img.width, img.height);
-        }
-    }
+/**
+ * Draw the countdown keypoints with their current colors
+ */
+function drawCountdownKeypoints() {
+    if (!currentCountdown || !currentCountdown.isActive) return;
     
-    // Reset tint for other drawing operations
-    noTint();
+    for (let keypoint of currentCountdown.keypoints) {
+        fill(keypoint.currentColor[0], keypoint.currentColor[1], keypoint.currentColor[2]);
+        noStroke();
+        circle(keypoint.x, keypoint.y, KEYPOINT_DOT_SIZE);
+    }
 }
 
-function manageImageFading() {
-    // Start fading images if we have too many on screen
-    if (placedImages.length > MAX_IMAGES_ON_SCREEN) {
-        // Sort by age (oldest first) and fade the oldest ones
-        placedImages.sort((a, b) => a.birthTime - b.birthTime);
-        
-        let imagesToFade = placedImages.length - MAX_IMAGES_ON_SCREEN;
-        
-        for (let i = 0; i < imagesToFade && i < placedImages.length; i++) {
-            placedImages[i].opacity -= IMAGE_FADE_RATE;
+/**
+ * Capture the current interaction - create outline and place images
+ * This is called when countdown completes
+ */
+function captureInteraction() {
+    if (!currentCountdown || currentCountdown.keypoints.length === 0) return;
+    
+    // Create the commemorative object that will store everything
+    let commemorativeObject = {
+        outline: null,          // Will be filled by outline capture
+        images: [],             // Will be filled with placed images
+        captureTime: millis(),
+        id: nextObjectId++
+    };
+    
+    // Create images for final keypoint positions with proper aspect ratio preservation
+    for (let keypoint of currentCountdown.keypoints) {
+        if (availableImages.length > 0) {
+            let selectedImage = availableImages[Math.floor(Math.random() * availableImages.length)];
+            let baseSize = 100 + Math.random() * 40; // Size variation for the constraining dimension
             
-            // Remove completely faded images
-            if (placedImages[i].opacity <= 0) {
-                placedImages.splice(i, 1);
-                i--; // Adjust index after removal
+            // Calculate proper dimensions that maintain the original image's aspect ratio
+            let originalAspectRatio = selectedImage.width / selectedImage.height;
+            let displayWidth, displayHeight;
+            
+            if (originalAspectRatio > 1) {
+                // Image is wider than tall - constrain by width
+                displayWidth = baseSize;
+                displayHeight = baseSize / originalAspectRatio;
+            } else {
+                // Image is taller than wide or square - constrain by height  
+                displayHeight = baseSize;
+                displayWidth = baseSize * originalAspectRatio;
+            }
+            
+            commemorativeObject.images.push({
+                image: selectedImage,
+                x: keypoint.x - displayWidth/2,
+                y: keypoint.y - displayHeight/2,
+                width: displayWidth,
+                height: displayHeight,
+                keypointName: keypoint.name,
+                originalAspectRatio: originalAspectRatio // Store for reference
+            });
+        }
+    }
+    
+    // Capture outline using body segmentation
+    initializeBodySegmentationForCapture(video, (segmentationResult) => {
+        if (segmentationResult && segmentationResult.mask) {
+            segmentationResult.mask.loadPixels();
+            let outline = extractEdgesFromMask(segmentationResult.mask);
+            
+            if (outline) {
+                commemorativeObject.outline = outline;
+            }
+            
+            // Clean up mask
+            segmentationResult.mask.remove();
+        }
+        
+        // Add completed object to collection
+        addCommemorativeObject(commemorativeObject);
+    });
+}
+
+/**
+ * Add commemorative object and manage collection size
+ */
+function addCommemorativeObject(newObject) {
+    commemorativeObjects.push(newObject);
+    
+    // Remove oldest objects if we exceed the maximum
+    if (commemorativeObjects.length > MAX_COMMEMORATIVE_OBJECTS) {
+        let objectsToRemove = commemorativeObjects.length - MAX_COMMEMORATIVE_OBJECTS;
+        commemorativeObjects.splice(0, objectsToRemove);
+    }
+}
+
+/**
+ * Draw all commemorative objects (outlines and images)
+ */
+function drawCommemorativeObjects() {
+    for (let obj of commemorativeObjects) {
+        // Draw outline if it exists
+        if (obj.outline) {
+            stroke(0);
+            strokeWeight(2);
+            noFill();
+            drawEdges(obj.outline, color(0), 2);
+        }
+        
+        // Draw all images for this object
+        for (let img of obj.images) {
+            if (img.image) {
+                image(img.image, img.x, img.y, img.width, img.height);
             }
         }
     }
 }
 
-function calculatePersonArea(mask) {
-    // Efficiently estimate person area by sampling pixels
-    mask.loadPixels();
-    let area = 0;
-    
-    // Sample every 4th pixel for performance
-    for (let i = 0; i < mask.pixels.length; i += 16) {
-        if (mask.pixels[i + 3] > 128) { // Check alpha channel
-            area += 4; // Account for sampling rate
-        }
-    }
-    
-    return area;
-}
-
-// Development helper - press 'p' to simulate placing images
+// Development helpers
 function keyPressed() {
-    if (key === 'p' || key === 'P') {
-        if (currentEdges) {
-            placeImagesForCurrentPerson();
+    if (key === 'r' || key === 'R') {
+        // Reset everything
+        currentCountdown = null;
+        commemorativeObjects = [];
+    }
+    if (key === 'c' || key === 'C') {
+        // Force capture (for testing)
+        if (currentCountdown && currentCountdown.isActive) {
+            captureInteraction();
+            currentCountdown = null;
         }
     }
 }
