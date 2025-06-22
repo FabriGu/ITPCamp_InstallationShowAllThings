@@ -19,10 +19,11 @@ const MAX_COMMEMORATIVE_OBJECTS = 10; // CHANGE THIS to adjust how many to keep
 const KEYPOINT_FADE_START_COLOR = [0, 255, 0]; // Bright green
 const KEYPOINT_FADE_END_COLOR = [0, 0, 0]; // Black
 const KEYPOINT_DOT_SIZE = 16; // Size of countdown dots
+const googleDriveEndpoint2015 = "https://drive.google.com/drive/folders/0B_u9N48AkhnwfjdOVmtEQTNRODRxLVBNcWhNeUxWTTdpdzZzWVFQaTBsRFF5SEhMMXN5cjQ?resourcekey=0-TAStoEYcEf5VNUdLXHd1gw&usp=drive_link";
 
 // Canvas dimensions
-const CANVAS_WIDTH = window.displayWidth - (window.displayWidth/5); // Adjusted for full window width
-const CANVAS_HEIGHT = window.displayHeight - (window.displayHeight/5);
+const CANVAS_WIDTH = window.displayWidth ; // Adjusted for full window width
+const CANVAS_HEIGHT = window.displayHeight;
 
 // System state - simplified for countdown model
 let video;
@@ -295,10 +296,53 @@ function captureInteraction() {
         captureTime: millis(),  // for reference
         id: nextObjectId++
     };
+
+    // just for left and right keypoints
+    // FIRST: Check if we have both shoulders and create center image
+    let leftShoulder = currentCountdown.keypoints.find(kp => kp.name === 'left_shoulder');
+    let rightShoulder = currentCountdown.keypoints.find(kp => kp.name === 'right_shoulder');
+
+    if (leftShoulder && rightShoulder && availableImages.length > 0) {
+        // Calculate center point between shoulders
+        let centerX = (leftShoulder.x + rightShoulder.x) / 2;
+        let centerY = (leftShoulder.y + rightShoulder.y) / 2;
+        
+        let selectedImage = availableImages[Math.floor(Math.random() * availableImages.length)];
+        let baseSize = (100 + Math.random() * 40) * 2; // 50% larger
+        
+        // Calculate proper dimensions
+        let originalAspectRatio = selectedImage.width / selectedImage.height;
+        let displayWidth, displayHeight;
+        
+        if (originalAspectRatio > 1) {
+            displayWidth = baseSize;
+            displayHeight = baseSize / originalAspectRatio;
+        } else {
+            displayHeight = baseSize;
+            displayWidth = baseSize * originalAspectRatio;
+        }
+        
+        commemorativeObject.images.push({
+            image: selectedImage,
+            x: centerX - displayWidth/2,
+            y: centerY - displayHeight/2,
+            width: displayWidth,
+            height: displayHeight,
+            keypointName: 'center_shoulders',
+            originalAspectRatio: originalAspectRatio
+        });
+    }
     
     // Create images for final keypoint positions with proper aspect ratio preservation
     for (let keypoint of currentCountdown.keypoints) {
+
         if (availableImages.length > 0) {
+
+            // Skip shoulder keypoints since we handled them above
+            if (keypoint.name === 'left_shoulder' || keypoint.name === 'right_shoulder') {
+                continue;
+            }
+
             let selectedImage = availableImages[Math.floor(Math.random() * availableImages.length)];
             let baseSize = 100 + Math.random() * 40; // Size variation for the constraining dimension
             
@@ -389,7 +433,13 @@ function drawCommemorativeObjects() {
         // Draw all images for this object
         for (let img of obj.images) {
             if (img.image) {
+                // apply border radius to images p5
+
+                // let borderRadius = img.width * 0.1; // 10% of
+
+
                 image(img.image, img.x, img.y, img.width, img.height);
+           
             }
         }
     }
