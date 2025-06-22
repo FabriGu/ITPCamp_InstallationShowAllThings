@@ -23,6 +23,7 @@ const captureSegmentationOptions = {
     runtime: "tfjs",    
     // internalResolution: "low",
     // multiSegmentation: true, // Single segmentation for simplicity
+    multiplier: 0.25,
     // modelType: "general",
     architecture: 'MobileNetV1',
     flipped: true

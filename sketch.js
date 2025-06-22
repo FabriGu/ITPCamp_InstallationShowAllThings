@@ -15,7 +15,7 @@
 // ========== CONFIGURABLE VARIABLES ==========
 
 const COUNTDOWN_DURATION = 3000; // 3 seconds - CHANGE THIS to adjust countdown time
-const MAX_COMMEMORATIVE_OBJECTS = 30; // CHANGE THIS to adjust how many to keep
+const MAX_COMMEMORATIVE_OBJECTS = 10; // CHANGE THIS to adjust how many to keep
 const KEYPOINT_FADE_START_COLOR = [0, 255, 0]; // Bright green
 const KEYPOINT_FADE_END_COLOR = [0, 0, 0]; // Black
 const KEYPOINT_DOT_SIZE = 16; // Size of countdown dots
@@ -176,7 +176,7 @@ function handleNoPersonDetected() {
  * Extract target keypoints for countdown and eventual image placement
  */
 function extractTargetKeypoints(pose) {
-    console.log("Extracting target keypoints from pose:", pose);
+    // console.log("Extracting target keypoints from pose:", pose);
     // Names taken from the ml5 bodySegmentation reference https://docs.ml5js.org/#/reference/body-segmentation
     const targetNames = [
         'nose',           // Head
@@ -364,13 +364,26 @@ function addCommemorativeObject(newObject) {
  * Draw all commemorative objects (outlines and images)
  */
 function drawCommemorativeObjects() {
-    for (let obj of commemorativeObjects) {
+    for (let objI in commemorativeObjects) {
+        let obj = commemorativeObjects[objI];
         // Draw outline if it exists
         if (obj.outline) {
-            stroke(0);
-            strokeWeight(2);
+            // turn color from black for newer objects to white for older object 
+            // This will make the first object black and the last one white
+            let colorValue = map(objI, MAX_COMMEMORATIVE_OBJECTS - 1, 0, 10,    255);
+            // let colorValue = map(objI,
+            // let colorValue = map(objI, 0, commemorativeObjects.length - 1, 0, 255);
+            stroke(colorValue);
+            // stroke(0);
+            // vary stroke weight making older obj thinner in stroke weight based on their index
+            // This will make the first object thicker and the last one thinner
+            // let strokeWeightValue = 2 + (commemorativeObjects.length - objI) * 0.5; // Thicker for older objects
+            // let strokeWeightValue = 2;
+            // map  stroke weight from 2 to 0.1 based on index where the first object is 2 and the last one is 0.1
+            let strokeWeightValue = map(objI, MAX_COMMEMORATIVE_OBJECTS - 1, 0, 2, 0.1);
+            strokeWeight(strokeWeightValue); // Thicker for older objects
             noFill();
-            drawEdges(obj.outline, color(0), 2);
+            drawEdges(obj.outline, color(colorValue), strokeWeightValue);
         }
         
         // Draw all images for this object
