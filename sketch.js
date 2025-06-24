@@ -104,7 +104,7 @@ function setup() {
 
 function draw() {
     // Clear background each frame
-    background(255);
+    background(0);
     
     // Draw all commemorative objects (outlines and images from past interactions)
     drawCommemorativeObjects();
@@ -487,7 +487,9 @@ function drawCommemorativeObjects() {
         let obj = commemorativeObjects[objI];
         
         if (obj.outline) {
-            let colorValue = map(objI, MAX_COMMEMORATIVE_OBJECTS - 1, 0, 10, 255);
+            // let colorValue = map(objI, MAX_COMMEMORATIVE_OBJECTS - 1, 0, 10, 255);
+            let colorValue = map(objI, MAX_COMMEMORATIVE_OBJECTS - 1, 0, 255, 10);
+
             stroke(colorValue);
             let strokeWeightValue = map(objI, MAX_COMMEMORATIVE_OBJECTS - 1, 0, 2, 0.1);
             strokeWeight(strokeWeightValue);
