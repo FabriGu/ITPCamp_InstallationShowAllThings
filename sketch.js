@@ -105,6 +105,11 @@ function setup() {
 function draw() {
     // Clear background each frame
     background(0);
+    // push();
+    // stroke(255, 50);
+    // strokeWeight(2);
+    // line(0, 100, width, 100);
+    // pop();
     
     // Draw all commemorative objects (outlines and images from past interactions)
     drawCommemorativeObjects();
@@ -115,6 +120,9 @@ function draw() {
     
     // Clean up inactive people (remove those who haven't been seen recently)
     cleanupInactivePeople();
+    // set up line across 50px on top of screen
+    
+    // line()
 }
 
 function loadAvailableImages() {
@@ -380,45 +388,46 @@ function placeImagesForPerson(personData, commemorativeObject) {
     let leftShoulder = keypoints.find(kp => kp.name === 'left_shoulder');
     let rightShoulder = keypoints.find(kp => kp.name === 'right_shoulder');
 
-    if (leftShoulder && rightShoulder && availableImages.length > 0) {
-        let centerX = (leftShoulder.x + rightShoulder.x) / 2;
-        let centerY = (leftShoulder.y + rightShoulder.y) / 2;
+    // if (leftShoulder && rightShoulder && availableImages.length > 0) {
+    //     let centerX = (leftShoulder.x + rightShoulder.x) / 2;
+    //     let centerY = (leftShoulder.y + rightShoulder.y) / 2;
         
-        let selectedImage = availableImages[Math.floor(Math.random() * availableImages.length)];
-        let baseSize = (100 + Math.random() * 40) * 2;
+    //     let selectedImage = availableImages[Math.floor(Math.random() * availableImages.length)];
+    //     let baseSize = (100 + Math.random() * 40) * 2;
         
-        let originalAspectRatio = selectedImage.width / selectedImage.height;
-        let displayWidth, displayHeight;
+    //     let originalAspectRatio = selectedImage.width / selectedImage.height;
+    //     let displayWidth, displayHeight;
         
-        if (originalAspectRatio > 1) {
-            displayWidth = baseSize;
-            displayHeight = baseSize / originalAspectRatio;
-        } else {
-            displayHeight = baseSize;
-            displayWidth = baseSize * originalAspectRatio;
-        }
+    //     if (originalAspectRatio > 1) {
+    //         displayWidth = baseSize;
+    //         displayHeight = baseSize / originalAspectRatio;
+    //     } else {
+    //         displayHeight = baseSize;
+    //         displayWidth = baseSize * originalAspectRatio;
+    //     }
         
-        commemorativeObject.images.push({
-            image: selectedImage,
-            x: centerX - displayWidth/2,
-            y: centerY - displayHeight/2,
-            width: displayWidth,
-            height: displayHeight,
-            keypointName: 'center_shoulders',
-            originalAspectRatio: originalAspectRatio,
-            personColor: personData.assignedColor // Store the person's color for reference
-        });
-    }
+    //     commemorativeObject.images.push({
+    //         image: selectedImage,
+    //         x: centerX - displayWidth/2,
+    //         // y: centerY - displayHeight/2,
+    //         y: 100 + (Math.random() * 40 - 20) - displayHeight/2,  // Centers on line at y=100 with ±20px variation
+    //         width: displayWidth,
+    //         height: displayHeight,
+    //         keypointName: 'center_shoulders',
+    //         originalAspectRatio: originalAspectRatio,
+    //         personColor: personData.assignedColor // Store the person's color for reference
+    //     });
+    // }
     
     // Place images on other keypoints
     for (let keypoint of keypoints) {
-        if (keypoint.name === 'left_shoulder' || keypoint.name === 'right_shoulder') {
-            continue; // Skip shoulders since we handled them above
-        }
+        // if (keypoint.name === 'left_shoulder' || keypoint.name === 'right_shoulder') {
+        //     continue; // Skip shoulders since we handled them above
+        // }
 
         if (availableImages.length > 0) {
             let selectedImage = availableImages[Math.floor(Math.random() * availableImages.length)];
-            let baseSize = 100 + Math.random() * 40;
+            let baseSize = 200 + Math.random() * 100;
             
             let originalAspectRatio = selectedImage.width / selectedImage.height;
             let displayWidth, displayHeight;
@@ -434,7 +443,8 @@ function placeImagesForPerson(personData, commemorativeObject) {
             commemorativeObject.images.push({
                 image: selectedImage,
                 x: keypoint.x - displayWidth/2,
-                y: keypoint.y - displayHeight/2,
+                // y: keypoint.y - displayHeight/2,
+                y: 100 + (Math.random() * 40 - 20) - displayHeight/2,  // Centers on line at y=100 with ±20px variation
                 width: displayWidth,
                 height: displayHeight,
                 keypointName: keypoint.name,
